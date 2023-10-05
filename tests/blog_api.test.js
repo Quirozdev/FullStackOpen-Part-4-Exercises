@@ -3,17 +3,15 @@ const supertest = require('supertest');
 const helper = require('./blog_api_test_helper');
 const app = require('../app');
 const Blog = require('../models/blog');
+const User = require('../models/user');
 
 const api = supertest(app);
 
 beforeEach(async () => {
   await Blog.deleteMany({});
+  await User.deleteMany({});
 
-  const blogObjects = helper.initialBlogs.map((blog) => new Blog(blog));
-
-  const promiseArray = blogObjects.map((blogObject) => blogObject.save());
-
-  await Promise.all(promiseArray);
+  await helper.insertBlogsWithAuthor();
 });
 
 describe('when there is some blogs initially saved', () => {
@@ -41,6 +39,8 @@ describe('when there is some blogs initially saved', () => {
 
 describe('addition of a new blog', () => {
   test('a valid blog can be added', async () => {
+    const testUser = await User.findOne({ username: 'testuser' });
+
     const newBlog = {
       title: 'waos',
       author: 'unknown',
@@ -50,7 +50,7 @@ describe('addition of a new blog', () => {
 
     await api
       .post('/api/blogs')
-      .send(newBlog)
+      .send({ ...newBlog, userId: testUser._id })
       .expect(201)
       .expect('Content-Type', /application\/json/);
 
@@ -64,10 +64,13 @@ describe('addition of a new blog', () => {
   });
 
   test('if the likes property is missing, it will default to 0', async () => {
+    const testUser = await User.findOne({ username: 'testuser' });
+
     const newBlogWithNoLikes = {
       title: 'waos',
       author: 'unknown',
       url: 'http://cats.com',
+      userId: testUser._id,
     };
 
     const response = await api.post('/api/blogs').send(newBlogWithNoLikes);
@@ -130,6 +133,100 @@ describe('update of a note', () => {
   });
 });
 
+describe('addition of a user', () => {
+  beforeEach(async () => {
+    await User.deleteMany({});
+  });
+
+  test('with valid data', async () => {
+    const usersAtStart = await helper.usersInDb();
+
+    const newUser = {
+      username: 'add',
+      name: 'hello',
+      password: 'wao',
+    };
+
+    await api
+      .post('/api/users')
+      .send(newUser)
+      .expect(201)
+      .expect('Content-Type', /application\/json/);
+
+    const usersAtEnd = await helper.usersInDb();
+
+    expect(usersAtEnd).toHaveLength(usersAtStart.length + 1);
+
+    const lastUser = usersAtEnd[usersAtEnd.length - 1];
+    expect(lastUser).toMatchObject({
+      username: newUser.username,
+      name: newUser.name,
+    });
+  });
+
+  test('fails with status code 400 when no username is provided', async () => {
+    const usersAtStart = await helper.usersInDb();
+
+    const newUser = {
+      name: 'hello',
+      password: 'waos1234',
+    };
+
+    await api.post('/api/users').send(newUser).expect(400);
+
+    const usersAtEnd = await helper.usersInDb();
+
+    expect(usersAtStart).toHaveLength(usersAtEnd.length);
+  });
+
+  test('fails with status code 400 when no password is provided', async () => {
+    const usersAtStart = await helper.usersInDb();
+
+    const newUser = {
+      username: 'hehe',
+      name: 'hello',
+    };
+
+    await api.post('/api/users').send(newUser).expect(400);
+
+    const usersAtEnd = await helper.usersInDb();
+
+    expect(usersAtStart).toHaveLength(usersAtEnd.length);
+  });
+
+  test('fails with status code 400 when username is not atleast 3 characters long', async () => {
+    const usersAtStart = await helper.usersInDb();
+
+    const newUser = {
+      username: 'he',
+      name: 'hello',
+      password: 'wow345',
+    };
+
+    await api.post('/api/users').send(newUser).expect(400);
+
+    const usersAtEnd = await helper.usersInDb();
+
+    expect(usersAtStart).toHaveLength(usersAtEnd.length);
+  });
+
+  test('fails with status code 400 when password is not atleast 3 characters long', async () => {
+    const usersAtStart = await helper.usersInDb();
+
+    const newUser = {
+      username: 'hehahe',
+      name: 'hello',
+      password: 'wo',
+    };
+
+    await api.post('/api/users').send(newUser).expect(400);
+
+    const usersAtEnd = await helper.usersInDb();
+
+    expect(usersAtStart).toHaveLength(usersAtEnd.length);
+  });
+});
+
 afterAll(async () => {
-  mongoose.connection.close();
+  await mongoose.connection.close();
 });

@@ -1,4 +1,6 @@
 const Blog = require('../models/blog');
+const User = require('../models/user');
+const bcrypt = require('bcrypt');
 
 const initialBlogs = [
   {
@@ -51,12 +53,40 @@ const initialBlogs = [
   },
 ];
 
+async function insertBlogsWithAuthor() {
+  const hashedPwd = await bcrypt.hash('waos1234', 10);
+  const newUser = new User({
+    username: 'testuser',
+    name: 'test',
+    passwordHash: hashedPwd,
+  });
+
+  const savedUser = await newUser.save();
+
+  const blogObjects = initialBlogs.map((blog) => {
+    return new Blog({ ...blog, user: savedUser._id });
+  });
+
+  const promisesArray = blogObjects.map((blog) => {
+    return blog.save();
+  });
+
+  await Promise.all(promisesArray);
+}
+
 async function getAllBlogs() {
   const blogs = await Blog.find({});
   return blogs.map((blog) => blog.toJSON());
 }
 
+async function usersInDb() {
+  const users = await User.find({});
+  return users.map((u) => u.toJSON());
+}
+
 module.exports = {
   initialBlogs,
   getAllBlogs,
+  usersInDb,
+  insertBlogsWithAuthor,
 };
