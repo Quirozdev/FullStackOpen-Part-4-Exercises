@@ -1,8 +1,7 @@
 const express = require('express');
 const blogsRouter = express.Router();
 const Blog = require('../models/blog');
-const User = require('../models/user');
-const jwt = require('jsonwebtoken');
+const { userExtractor } = require('../utils/middleware');
 
 blogsRouter.get('/', async (req, res, next) => {
   try {
@@ -16,30 +15,24 @@ blogsRouter.get('/', async (req, res, next) => {
   }
 });
 
-blogsRouter.post('/', async (req, res, next) => {
+blogsRouter.post('/', userExtractor, async (req, res, next) => {
   try {
-    const decodedToken = jwt.verify(req.token, process.env.SECRET);
-    if (!decodedToken.id) {
-      return res.status(401).json({ error: 'token invalid' });
-    }
     const { title, author, likes, url } = req.body;
     if (!title || !url) {
       return res.status(400).send({ error: 'title and url must be provided' });
     }
-
-    const user = await User.findById(decodedToken.id);
 
     const blog = new Blog({
       title,
       author,
       likes: likes || 0,
       url,
-      user: user.id,
+      user: req.user._id.toString(),
     });
 
     const savedBlog = await blog.save();
-    user.blogs = user.blogs.concat(savedBlog._id);
-    await user.save();
+    req.user.blogs = req.user.blogs.concat(savedBlog._id);
+    await req.user.save();
 
     res.status(201).json(savedBlog);
   } catch (error) {
@@ -47,16 +40,11 @@ blogsRouter.post('/', async (req, res, next) => {
   }
 });
 
-blogsRouter.delete('/:id', async (req, res, next) => {
+blogsRouter.delete('/:id', userExtractor, async (req, res, next) => {
   try {
-    const decodedToken = jwt.verify(req.token, process.env.SECRET);
-    if (!decodedToken.id) {
-      return res.status(401).json({ error: 'token invalid' });
-    }
-
     const blog = await Blog.findOne({ _id: req.params.id });
 
-    if (blog.user.toString() !== decodedToken.id.toString()) {
+    if (blog.user.toString() !== req.user._id.toString()) {
       return res
         .status(403)
         .json({ error: 'you are not the owner of that blog!' });
@@ -69,19 +57,36 @@ blogsRouter.delete('/:id', async (req, res, next) => {
   }
 });
 
-blogsRouter.put('/:id', async (req, res, next) => {
+blogsRouter.put('/:id', userExtractor, async (req, res, next) => {
   try {
+    const savedBlog = await Blog.findById(req.params.id);
+
+    if (!savedBlog) {
+      return res.status(404).send({ error: 'blog not found' });
+    }
+
+    if (savedBlog.user.toString() !== req.user._id.toString()) {
+      return res
+        .status(403)
+        .json({ error: 'you are not the owner of that blog!' });
+    }
+
     const { title, author, likes, url } = req.body;
 
-    const blog = {
+    const blogUpdate = {
       title,
       author,
       likes,
       url,
     };
-    const updatedBlog = await Blog.findByIdAndUpdate(req.params.id, blog, {
-      new: true,
-    });
+
+    const updatedBlog = await Blog.findByIdAndUpdate(
+      req.params.id,
+      blogUpdate,
+      {
+        new: true,
+      }
+    );
     res.json(updatedBlog);
   } catch (error) {
     next(error);

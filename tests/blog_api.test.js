@@ -7,14 +7,14 @@ const User = require('../models/user');
 
 const api = supertest(app);
 
-beforeEach(async () => {
-  await Blog.deleteMany({});
-  await User.deleteMany({});
-
-  await helper.insertBlogsWithAuthor();
-});
-
 describe('when there is some blogs initially saved', () => {
+  beforeAll(async () => {
+    await Blog.deleteMany({});
+    await User.deleteMany({});
+
+    await helper.insertBlogsWithAuthor();
+  });
+
   test('blogs are returned as JSON', async () => {
     await api
       .get('/api/blogs')
@@ -37,99 +37,147 @@ describe('when there is some blogs initially saved', () => {
   });
 });
 
-describe('addition of a new blog', () => {
-  test('a valid blog can be added', async () => {
-    const testUser = await User.findOne({ username: 'testuser' });
+describe('addition, edition or deletion of a new blog', () => {
+  let token;
 
-    const newBlog = {
-      title: 'waos',
-      author: 'unknown',
-      url: 'http://cats.com',
-      likes: 6,
-    };
-
+  beforeAll(async () => {
     await api
-      .post('/api/blogs')
-      .send({ ...newBlog, userId: testUser._id })
-      .expect(201)
-      .expect('Content-Type', /application\/json/);
-
-    const blogsAfterAdd = await helper.getAllBlogs();
-
-    expect(blogsAfterAdd).toHaveLength(helper.initialBlogs.length + 1);
-
-    const lastBlog = blogsAfterAdd[blogsAfterAdd.length - 1];
-
-    expect(lastBlog).toMatchObject(newBlog);
+      .post('/api/login')
+      .send({
+        username: helper.testUser.username,
+        password: helper.testUser.password,
+      })
+      .then((res) => {
+        token = res.body.token;
+      });
   });
 
-  test('if the likes property is missing, it will default to 0', async () => {
-    const testUser = await User.findOne({ username: 'testuser' });
+  describe('addition of a new blog', () => {
+    test('without a provided token fails with status code 401', async () => {
+      const blogs = await helper.getAllBlogs();
+      const newBlog = {
+        title: 'waos',
+        author: 'unknown',
+        url: 'http://cats.com',
+        likes: 6,
+      };
 
-    const newBlogWithNoLikes = {
-      title: 'waos',
-      author: 'unknown',
-      url: 'http://cats.com',
-      userId: testUser._id,
-    };
+      await api.post('/api/blogs').send(newBlog).expect(401);
 
-    const response = await api.post('/api/blogs').send(newBlogWithNoLikes);
+      const blogsAfter = await helper.getAllBlogs();
 
-    const savedBlog = response.body;
+      expect(blogsAfter).toHaveLength(blogs.length);
+    });
 
-    expect(savedBlog.likes).toBe(0);
+    test('a valid blog can be added', async () => {
+      const newBlog = {
+        title: 'waos',
+        author: 'unknown',
+        url: 'http://cats.com',
+        likes: 6,
+      };
+
+      await api
+        .post('/api/blogs')
+        .set('Authorization', `Bearer ${token}`)
+        .send(newBlog)
+        .expect(201)
+        .expect('Content-Type', /application\/json/);
+
+      const blogsAfterAdd = await helper.getAllBlogs();
+
+      expect(blogsAfterAdd).toHaveLength(helper.initialBlogs.length + 1);
+
+      const lastBlog = blogsAfterAdd[blogsAfterAdd.length - 1];
+
+      expect(lastBlog).toMatchObject(newBlog);
+    });
+
+    test('if the likes property is missing, it will default to 0', async () => {
+      const newBlogWithNoLikes = {
+        title: 'waos',
+        author: 'unknown',
+        url: 'http://cats.com',
+      };
+
+      const response = await api
+        .post('/api/blogs')
+        .set('Authorization', `Bearer ${token}`)
+        .send(newBlogWithNoLikes);
+
+      const savedBlog = response.body;
+
+      expect(savedBlog.likes).toBe(0);
+    });
+
+    test('if the title or url properties are missing, responds with status code 400', async () => {
+      const newBlogWithNoTitleNorUrl = {
+        author: 'unknown',
+        likes: 3,
+      };
+
+      await api
+        .post('/api/blogs')
+        .set('Authorization', `Bearer ${token}`)
+        .send(newBlogWithNoTitleNorUrl)
+        .expect(400);
+    });
   });
 
-  test('if the title or url properties are missing, responds with status code 400', async () => {
-    const newBlogWithNoTitleNorUrl = {
-      author: 'unknown',
-      likes: 3,
-    };
+  describe('deletion of a blog', () => {
+    test('succeeds with status code 204 when id is valid', async () => {
+      const blogs = await helper.getAllBlogs();
 
-    await api.post('/api/blogs').send(newBlogWithNoTitleNorUrl).expect(400);
-  });
-});
+      const firstBlog = blogs[0];
+      await api
+        .delete(`/api/blogs/${firstBlog.id}`)
+        .set('Authorization', `Bearer ${token}`)
+        .expect(204);
 
-describe('deletion of a note', () => {
-  test('succeeds with status code 204 when id is valid', async () => {
-    const blogs = await helper.getAllBlogs();
+      const blogsAfterDelete = await helper.getAllBlogs();
 
-    const firstBlog = blogs[0];
-    await api.delete(`/api/blogs/${firstBlog.id}`).expect(204);
+      expect(blogsAfterDelete).toHaveLength(blogs.length - 1);
 
-    const blogsAfterDelete = await helper.getAllBlogs();
+      expect(blogsAfterDelete).not.toContainEqual(firstBlog);
+    });
 
-    expect(blogsAfterDelete).toHaveLength(helper.initialBlogs.length - 1);
-
-    expect(blogsAfterDelete).not.toContainEqual(firstBlog);
-  });
-
-  test('fails with status code 400 when id is invalid', async () => {
-    await api.delete('/api/blogs/zxsddddd1').expect(400);
-  });
-});
-
-describe('update of a note', () => {
-  test('succeeds with status code 200 when id is valid', async () => {
-    const blogUpdate = {
-      likes: 1034,
-      url: undefined,
-    };
-
-    const blogs = await helper.getAllBlogs();
-
-    const firstBlog = blogs[0];
-    await api.put(`/api/blogs/${firstBlog.id}`).send(blogUpdate).expect(200);
-
-    const blogsAfterUpdate = await helper.getAllBlogs();
-
-    const updatedBlog = blogsAfterUpdate[0];
-
-    expect(updatedBlog).toEqual({ ...firstBlog, likes: 1034 });
+    test('fails with status code 400 when id is invalid', async () => {
+      await api
+        .delete('/api/blogs/zxsddddd1')
+        .set('Authorization', `Bearer ${token}`)
+        .expect(400);
+    });
   });
 
-  test('fails with status code 400 when id is invalid', async () => {
-    await api.put('/api/blogs/zxsddddd1').expect(400);
+  describe('update of a blog', () => {
+    test('succeeds with status code 200 when id is valid', async () => {
+      const blogUpdate = {
+        likes: 1034,
+        url: undefined,
+      };
+
+      const blogs = await helper.getAllBlogs();
+
+      const firstBlog = blogs[0];
+      await api
+        .put(`/api/blogs/${firstBlog.id}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send(blogUpdate)
+        .expect(200);
+
+      const blogsAfterUpdate = await helper.getAllBlogs();
+
+      const updatedBlog = blogsAfterUpdate[0];
+
+      expect(updatedBlog).toEqual({ ...firstBlog, likes: 1034 });
+    });
+
+    test('fails with status code 400 when id is invalid', async () => {
+      await api
+        .put('/api/blogs/zxsddddd1')
+        .set('Authorization', `Bearer ${token}`)
+        .expect(400);
+    });
   });
 });
 

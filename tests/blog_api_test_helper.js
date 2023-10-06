@@ -53,11 +53,17 @@ const initialBlogs = [
   },
 ];
 
+const testUser = {
+  username: 'testuser',
+  name: 'testing',
+  password: 'test',
+};
+
 async function insertBlogsWithAuthor() {
-  const hashedPwd = await bcrypt.hash('waos1234', 10);
+  const hashedPwd = await bcrypt.hash(testUser.password, 10);
   const newUser = new User({
-    username: 'testuser',
-    name: 'test',
+    username: testUser.username,
+    name: testUser.name,
     passwordHash: hashedPwd,
   });
 
@@ -86,6 +92,7 @@ async function usersInDb() {
 
 module.exports = {
   initialBlogs,
+  testUser,
   getAllBlogs,
   usersInDb,
   insertBlogsWithAuthor,
